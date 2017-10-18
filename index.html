@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+
+<style>
+
+
+</style>
+
+
+<!-- <svg width="960" height="500"></svg> -->
+
+<script src="js/d3.v4.min.js"></script>
+<script src="js/lodash.js"></script>
+<script>
+
+
+d3.json("data/FR-dataGrid2011.json", data => {
+
+  //regular expressions to extract lat/lon and
+  //their sign (positive/negative) from Grid cell ID
+  const reLat = /.*[NS]([0-9]+)[EW].*/,
+    reLon = /.*[EW]([0-9]+)/,
+    reLatSign = /.*([NS]).*/
+    reLonSign = /.*([EW]).*/
+
+  data.forEach(d => {
+    const lat = reLat.exec(d.GRD_ID)[1]/100 || null;
+    const lon = reLon.exec(d.GRD_ID)[1]/100 || null;
+    const latSign = reLatSign.exec(d.GRD_ID)[1] === "N" ? 1 : -1;
+    const lonSign = reLonSign.exec(d.GRD_ID)[1] === "E" ? 1 : -1;
+
+    d.lat = lat * latSign;
+    d.lon = lon * lonSign;
+
+  })
+
+  //initial image
+  let [imageData, imWidth, imHeight, dataBuffer] = convertDatatoImage(data);
+  loadImage(imageData, imWidth, imHeight);
+
+  //Model parameters
+  const beta = 0.01 //how transmittable the disease is. One bite is all it takes!
+  const gamma = 1 //how fast you go from zombie to dead. Has to be some sort of average of how fast our zombie hunters is working...
+
+  //patient 0
+  const posI_0 = 3700204
+  dataBuffer[posI_0] = 1
+
+  let nInfected = 0;
+  for (let y = 0; y < imHeight; y++) {
+    for (let x = 0; x < imWidth; x++) {
+      let pos = (y * imWidth + x) * 4 + 0; // position in buffer based
+        nInfected += dataBuffer[pos]
+    }
+  }
+
+console.log(nInfected)
+
+  let iter = 0;
+
+  //update with new data every sec
+  let timer = d3.interval(function() {
+
+
+    dataBuffer = euler(dataBuffer, beta, gamma, imWidth, imHeight);
+
+    let dataImage = convertMatrixtoImage(dataBuffer, imWidth, imHeight);
+
+    updateImageData(dataImage, imWidth, imHeight)
+
+    nInfected = 0;
+    for (let y = 0; y < imHeight; y++) {
+      for (let x = 0; x < imWidth; x++) {
+        let pos = (y * imWidth + x) * 4 + 0; // position in buffer based
+          nInfected += dataBuffer[pos]
+    }
+  }
+
+  console.log(nInfected)
+
+  iter += 1
+  if (iter >= 20) timer.stop()
+
+
+}, 500);
+
+
+
+})//d3.json
+
+function convertDatatoImage(data){
+  const [matrixData, extentLon, extentLat, maxValue] = formatData(data);
+  const imWidth = matrixData[0].length
+  const imHeight = matrixData.length
+
+  let buffer = new Uint8ClampedArray(imWidth * imHeight * 4); // have enough bytes
+  let dataBuffer = new Uint8ClampedArray(imWidth * imHeight * 4); // have enough bytes
+
+  //start by y since data grouped by latitude first
+  for (let y = 0; y < imHeight; y++) {
+    for (let x = 0; x < imWidth; x++) {
+        const pos = (y * imWidth + x) * 4; // position in buffer based on x and y
+        buffer[pos  ] = 0; // some R value [0, 255]
+        buffer[pos+1] = 0;           // some G value
+        buffer[pos+2] = matrixData[y][x]["population"];           // some B value
+        // buffer[pos+2] = Math.round(255*matrixData[y][x]["population"]/maxValue); // some B value
+        buffer[pos+3] = 255;           // set alpha channel
+
+        dataBuffer[pos  ] = 0;           // some R value [0, 255]
+        dataBuffer[pos+1] = 0;           // some G value
+        dataBuffer[pos+2] = matrixData[y][x]["population"];           // some B value
+        dataBuffer[pos+3] = 0;           // set alpha channel
+    }
+  }
+
+  // create off-screen canvas element
+  // let canvas = document.createElement('canvas'),
+  //     ctx = canvas.getContext('2d');
+  const canvas = document.createElement('canvas'),
+        ctx = canvas.getContext('2d');
+
+  canvas.width = imWidth;
+  canvas.height = imHeight;
+
+
+  // create imageData object
+  let imData = ctx.createImageData(imWidth, imHeight);
+
+  // set our buffer as source
+  imData.data.set(buffer);
+
+  // update canvas with new data
+  ctx.putImageData(imData, 0, 0);
+
+  const dataUri = canvas.toDataURL(); // produces a PNG file
+
+  return [dataUri, imWidth, imHeight, dataBuffer]
+}
+
+
+function convertMatrixtoImage(dataBuffer, imWidth, imHeight){
+
+  let buffer = new Uint8ClampedArray(imWidth * imHeight * 4); // have enough bytes
+
+  //normalize data
+  for (let y = 0; y < imHeight; y++) {
+    for (let x = 0; x < imWidth; x++) {
+        var pos = (y * imWidth + x) * 4; // position in buffer based on x and y
+        // buffer[pos  ] = Math.floor(255*dataBuffer[pos  ]/maxValue);           // some R value [0, 255]
+        // buffer[pos+1] = Math.floor(255*dataBuffer[pos+1]/maxValue);           // some G value
+        // buffer[pos+2] = Math.round(255*dataBuffer[pos+2]/maxValue);           // some B value
+        // buffer[pos+3] = 255;           // set alpha channel
+        buffer[pos  ] = dataBuffer[pos  ];           // some R value [0, 255]
+        buffer[pos+1] = dataBuffer[pos+1];           // some G value
+        buffer[pos+2] = dataBuffer[pos+2];           // some B value
+        buffer[pos+3] = 255;           // set alpha channel
+    }
+  }
+  // create off-screen canvas element
+  // let canvas = document.createElement('canvas'),
+  //     ctx = canvas.getContext('2d');
+  const canvas = document.createElement('canvas'),
+    ctx = canvas.getContext('2d');
+
+  canvas.width = imWidth;
+  canvas.height = imHeight;
+
+  // create imageData object
+  let imData = ctx.createImageData(imWidth, imHeight);
+
+  // set our buffer as source
+  imData.data.set(buffer);
+
+  // update canvas with new data
+  ctx.putImageData(imData, 0, 0);
+
+  const dataUri = canvas.toDataURL(); // produces a PNG file
+
+  return dataUri
+}
+
+
+function loadImage(dataImage, imWidth, imHeight){
+
+  const img = new Image()
+  const canvas = d3.select('body')
+      .append('canvas')
+      .attr("width", imWidth)
+      .attr("height", imHeight)
+
+  const ctx = canvas.node().getContext('2d')
+
+  img.src = dataImage
+
+  img.onload = function() {
+
+    //flip image vertically
+    ctx.scale(1,-1);
+    ctx.translate(0,-imHeight);
+
+    ctx.drawImage(img, 0, 0, imWidth, imHeight)
+  }
+}
+
+
+
+function updateImageData(dataImage, imWidth, imHeight){
+
+  const img = new Image()
+  const canvas = d3.select('canvas')
+  const ctx = canvas.node().getContext('2d')
+  img.src = dataImage
+
+  img.onload = function() {
+
+    ctx.drawImage(img, 0, 0, imWidth, imHeight)
+  }
+}
+
+
+function formatData(data, lonStep=0.01, latStep=0.01, scalePop=1){
+
+  // const nestedData = d3.nest()
+  //   .key(d => d.lat)
+  //   .sortKeys((a, b) => {
+  //     a = parseFloat(a);
+  //     b=parseFloat(b);
+  //     return d3.ascending(a, b)
+  //   })
+  //   // .sortValues((a, b) => {
+  //   //   a = parseFloat(a.lon);
+  //   //   b=parseFloat(b.lon);
+  //   //   return d3.ascending(a, b)
+  //   // })
+  //   .entries(data)
+  // debugger
+
+  const extentLon = d3.extent(data, d => d.lon);
+  const extentLat = d3.extent(data, d => d.lat);
+
+  const lonRange = d3.range(extentLon[0], extentLon[1]+lonStep, lonStep).map(d => Math.floor(d*(1/lonStep))/(1/lonStep));
+  const latRange = d3.range(extentLat[0], extentLat[1]+latStep, 0.01).map(d => Math.floor(d*(1/latStep))/(1/latStep));
+
+  //2D binning
+  let matrixLatLon = [];
+  for(var i=0; i<latRange.length; i++) {
+    matrixLatLon[i] = [];
+    for(var j=0; j<lonRange.length; j++) {
+      matrixLatLon[i][j] = [];
+    }
+  }
+
+  data.forEach(d => {
+    const latIdx = latRange.indexOf(Math.floor(d.lat*(1/latStep))/(1/latStep));
+    const lonIdx = lonRange.indexOf(Math.floor(d.lon*(1/lonStep))/(1/lonStep));
+
+    matrixLatLon[latIdx][lonIdx].push(+d.TOT_P)
+  });
+
+  let allValues = [];
+  const matrixData = matrixLatLon.map((lat,i) => lat.map((lon,j) => {
+    allValues.push(matrixLatLon[i][j])
+    return {
+            lon: lonRange[j],
+            lat: latRange[i],
+            population: (d3.sum(matrixLatLon[i][j])*scalePop),
+            }
+    })
+  );
+
+  const maxValue = d3.max(allValues)
+
+  return [matrixData, extentLon, extentLat, maxValue]
+
+}//formatData
+
+
+
+function euler(imData, beta, gamma, imWidth, imHeight){
+
+  let newData = []
+  //start by y since data grouped by latitude first
+  for (let y = 0; y < imHeight; y++) {
+    for (let x = 0; x < imWidth; x++) {
+      const posS = (y * imWidth + x) * 4 + 2; //blue layer
+      const posI = (y * imWidth + x) * 4 + 0;
+      const posR = (y * imWidth + x) * 4 + 1; // position in buffer based on x and y
+
+      const posAlpha = (y * imWidth + x) * 4 + 3; // position in buffer based on x and y
+      newData[posAlpha] = 255
+
+      const posS_a = ((y-1) * imWidth + x) * 4 + 2;
+      const posI_a = ((y-1) * imWidth + x) * 4 + 0;
+
+      const posS_b = ((y+1) * imWidth + x) * 4 + 2;
+      const posI_b = ((y+1) * imWidth + x) * 4 + 0;
+
+      //susceptibles
+      let deltaS = ( - beta * (
+
+        //line above
+        imData[posS_a  ] * imData[posI_a  ] +
+        imData[posS_a-4] * imData[posI_a-4] +
+        imData[posS_a+4] * imData[posI_a+4] +
+
+        //same line
+        imData[posS  ] * imData[posI  ] +
+        imData[posS-4] * imData[posI-4] +
+        imData[posS+4] * imData[posI+4] +
+
+        //line below
+        imData[posS_b  ] * imData[posI_b  ] +
+        imData[posS_b-4] * imData[posI_b-4] +
+        imData[posS_b+4] * imData[posI_b+4]
+
+         )
+
+      ) | 0
+
+      if (-deltaS > imData[posS]) newData[posS] = 0
+      else if (-deltaS <= imData[posS]) newData[posS] = imData[posS] + deltaS
+
+      //infected
+      newData[posI ] = imData[posI ] + ( beta * (
+
+        //line above
+        imData[posS_a  ] * imData[posI_a  ] +
+        imData[posS_a-4] * imData[posI_a-4] +
+        imData[posS_a+4] * imData[posI_a+4] +
+
+        //same line
+        imData[posS  ] * imData[posI  ] +
+        imData[posS-4] * imData[posI-4] +
+        imData[posS+4] * imData[posI+4] +
+
+        //line below
+        imData[posS_b  ] * imData[posI_b  ] +
+        imData[posS_b-4] * imData[posI_b-4] +
+        imData[posS_b+4] * imData[posI_b+4]
+
+         ) - gamma * imData[posI]
+
+      ) | 0
+
+      //infected
+      newData[posR ] = imData[posR ] + (
+
+        gamma * imData[posI]
+
+      ) | 0
+
+    }
+  }
+  return newData
+}
+
+function kernel(d1, imWidth, imHeight, k) {
+  let d2 = []
+
+  for (let y = 0; y < imHeight; y++) {
+    for (let x = 0; x < imWidth; x++) {
+      const pos = (y * imWidth + x) * 4 + 2; //blue layer
+      const pos_a = ((y-1) * imWidth + x) * 4 + 2;
+      const pos_b = ((y+1) * imWidth + x) * 4 + 2;
+      // WARNING: Optimized code.
+      d2[pos] = (
+          d1[pos_a - 4] * k[0]
+        + d1[pos_a] * k[1]
+        + d1[pos_a + 4] * k[2]
+        + d1[pos-4] * k[3]
+        + d1[pos] * k[4]
+        + d1[pos + 4] * k[5]
+        + d1[pos_b-4] * k[6]
+        + d1[pos_b] * k[7]
+        + d1[pos_b+4] * k[8]
+      ) | 0
+    }
+  }
+
+d1 = d2
+
+}
+
+
+
+</script>

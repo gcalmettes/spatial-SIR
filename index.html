@@ -41,11 +41,15 @@ d3.json("data/FR-dataGrid2011.json", data => {
 
   //Model parameters
   const beta = 0.01 //how transmittable the disease is. One bite is all it takes!
-  const gamma = 1 //how fast you go from zombie to dead. Has to be some sort of average of how fast our zombie hunters is working...
+  const gamma = 3 //2 incrementation how fast you go from zombie to dead. Has to be some sort of average of how fast our zombie hunters is working...
 
   //patient 0
-  const posI_0 = 3700204
+  // const posI_0 = 175372
+  // const posI_0 = 246340
+  const posI_0 = 1004028
   dataBuffer[posI_0] = 1
+
+  // debugger
 
   let nInfected = 0;
   for (let y = 0; y < imHeight; y++) {
@@ -60,7 +64,7 @@ console.log(nInfected)
   let iter = 0;
 
   //update with new data every sec
-  let timer = d3.interval(function() {
+  let timer = d3.timer(function() {
 
 
     dataBuffer = euler(dataBuffer, beta, gamma, imWidth, imHeight);
@@ -69,21 +73,25 @@ console.log(nInfected)
 
     updateImageData(dataImage, imWidth, imHeight)
 
+    nSusceptible = 0;
     nInfected = 0;
+    nRemoved = 0;
     for (let y = 0; y < imHeight; y++) {
       for (let x = 0; x < imWidth; x++) {
         let pos = (y * imWidth + x) * 4 + 0; // position in buffer based
           nInfected += dataBuffer[pos]
+          nRemoved += dataBuffer[pos+1]
+          nSusceptible += dataBuffer[pos+2]
     }
   }
 
-  console.log(nInfected)
+  console.log(nInfected, nRemoved)
 
   iter += 1
-  if (iter >= 20) timer.stop()
+  if (iter >= 500) timer.stop()
 
 
-}, 500);
+});
 
 
 
@@ -103,13 +111,13 @@ function convertDatatoImage(data){
         const pos = (y * imWidth + x) * 4; // position in buffer based on x and y
         buffer[pos  ] = 0; // some R value [0, 255]
         buffer[pos+1] = 0;           // some G value
-        buffer[pos+2] = matrixData[y][x]["population"];           // some B value
+        buffer[pos+2] = matrixData[y][x];           // some B value
         // buffer[pos+2] = Math.round(255*matrixData[y][x]["population"]/maxValue); // some B value
         buffer[pos+3] = 255;           // set alpha channel
 
         dataBuffer[pos  ] = 0;           // some R value [0, 255]
         dataBuffer[pos+1] = 0;           // some G value
-        dataBuffer[pos+2] = matrixData[y][x]["population"];           // some B value
+        dataBuffer[pos+2] = matrixData[y][x];           // some B value
         dataBuffer[pos+3] = 0;           // set alpha channel
     }
   }
@@ -219,7 +227,7 @@ function updateImageData(dataImage, imWidth, imHeight){
 }
 
 
-function formatData(data, lonStep=0.01, latStep=0.01, scalePop=1){
+function formatData2(data, lonStep=0.01, latStep=0.01, scalePop=1){
 
   // const nestedData = d3.nest()
   //   .key(d => d.lat)
@@ -276,6 +284,64 @@ function formatData(data, lonStep=0.01, latStep=0.01, scalePop=1){
 }//formatData
 
 
+function formatData(data){
+
+  //binning data by 0.02 lat and lon units
+  //keep lon and lat not decimal to fix sorting problem
+  const nestedData = d3.nest()
+    .key(d => _.floor(d.lat*500, -1)/5)
+    .sortKeys((a, b) => {
+      a = parseFloat(a);
+      b=parseFloat(b);
+      return d3.ascending(a, b)
+    })
+    .key(d => _.floor(d.lon*500, -1)/5)
+    .sortKeys((a, b) => {
+      a = parseFloat(a);
+      b=parseFloat(b);
+      return d3.ascending(a, b)
+    })
+    .entries(data)
+
+  //organize data in grid with access by lat/lon keys
+  let gridData = {};
+  nestedData.map(lat => lat.values.map(
+    lon => {
+      if (!gridData[lat.key]) gridData[lat.key] = {}
+      gridData[lat.key][lon.key] = d3.sum(lon.values, d => d.TOT_P)
+      }
+    )
+  )
+
+  const extentLon = d3.extent(data, d => d.lon*100);
+  const extentLat = d3.extent(data, d => d.lat*100);
+
+  const latRange = d3.range(extentLat[0], extentLat[1]+2, 2)
+  const lonRange = d3.range(extentLon[0], extentLon[1]+2, 2)
+
+  //put data into matrix covering entire space
+  let matrixLatLon = new Array(latRange.length);
+  for(var i=0; i<latRange.length; i++) {
+    matrixLatLon[i] = new Array(lonRange.length);
+  }
+
+  latRange.map((lat, i) => lonRange.map(
+    (lon, j) => {
+      if (gridData[lat] == null) matrixLatLon[i][j] = 0
+      else matrixLatLon[i][j] = gridData[lat][lon] | 0
+      }
+    )
+  )
+
+  const allValues = _.flatten(matrixLatLon)
+  const maxValue = d3.max(allValues)
+
+  // return [matrixData, extentLon, extentLat, maxValue]
+  return [matrixLatLon, extentLon, extentLat, maxValue]
+
+}//formatData
+
+
 
 function euler(imData, beta, gamma, imWidth, imHeight){
 
@@ -322,7 +388,7 @@ function euler(imData, beta, gamma, imWidth, imHeight){
       else if (-deltaS <= imData[posS]) newData[posS] = imData[posS] + deltaS
 
       //infected
-      newData[posI ] = imData[posI ] + ( beta * (
+      let deltaI = imData[posI ] + ( beta * (
 
         //line above
         imData[posS_a  ] * imData[posI_a  ] +
@@ -342,6 +408,9 @@ function euler(imData, beta, gamma, imWidth, imHeight){
          ) - gamma * imData[posI]
 
       ) | 0
+
+      if (-deltaI > imData[posI]) newData[posI] = 0
+      else if (-deltaI <= imData[posI]) newData[posI] = imData[posI] + deltaI
 
       //infected
       newData[posR ] = imData[posR ] + (

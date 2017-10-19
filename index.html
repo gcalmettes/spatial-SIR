@@ -32,7 +32,7 @@
 
 
 const margin = {top: 50, right: 10, bottom: 50, left: 50},
-      width = 400 - margin.left - margin.right,
+      width = 450 - margin.left - margin.right,
       height = 250 - margin.top - margin.bottom
 
 const svgInfection = d3.select("#infectionGraph")
@@ -106,7 +106,7 @@ d3.json("data/FR-dataGrid2011.json", data => {
   const posI_0 = 410204
   dataGrid[posI_0] = 1
 
-  //Initial state
+  //Initial state of susceptibles/infected/dead people
   let nInfected = [],
       nRemoved = [],
       nSusceptible = [],
@@ -118,22 +118,22 @@ d3.json("data/FR-dataGrid2011.json", data => {
   nRemoved.push(pRemoved)
   nSusceptible.push(pSusceptible)
 
+  //Run the simulation for iterMax iterations
   let iter = 0;
+  const iterMax = 400;
 
-  //Run simulation
-  let timer = d3.timer(function() {
-    
-    //simulation increment
+  const timer = d3.timer(function() {
+    //euler method to calculate new state
     dataGrid = euler(dataGrid, beta, gamma, imWidth, imHeight);
 
-    //generate new image from new data
-    let dataImage = convertMatrixtoImage(dataGrid, imWidth, imHeight);
+    //generate new image from the latest simulation data
+    let dataImage = convertBuffertoImage(dataGrid, imWidth, imHeight);
     updateImageData(dataImage, imWidth, imHeight)
 
-    //store iteration results
+    //store current susceptibles/infected/dead state
     let [pInfected, pRemoved, pSusceptible] = storeState(dataGrid, imWidth, imHeight)
 
-    if (ct++ > width) {
+    if (ct++ > width) { //rolling window
       nInfected.shift();
       nRemoved.shift();
       nSusceptible.shift();
@@ -165,7 +165,7 @@ d3.json("data/FR-dataGrid2011.json", data => {
 
 
   iter += 1
-  if (iter >= 400) timer.stop()
+  if (iter >= iterMax) timer.stop()
 
 });
 
@@ -188,88 +188,76 @@ function storeState(dataGrid, imWidth, imHeight){
     }
   }
   return [pI, pR, pS]
-}
+}//storeState
 
 function convertDatatoImage(data){
-  const [matrixData, extentLon, extentLat, maxValue] = formatData(data);
+
+  const [matrixData, extentLon, extentLat] = formatData(data);
   const imWidth = matrixData[0].length
   const imHeight = matrixData.length
 
-  let buffer = new Uint8ClampedArray(imWidth * imHeight * 4); // have enough bytes
+  let buffer = new Uint8ClampedArray(imWidth * imHeight * 4);//reserving enough bytes
 
   //start by y since data grouped by latitude first
   for (let y = 0; y < imHeight; y++) {
     for (let x = 0; x < imWidth; x++) {
-        const pos = (y * imWidth + x) * 4; // position in buffer based on x and y
-        buffer[pos  ] = 0; // some R value [0, 255]
-        buffer[pos+1] = 0;           // some G value
-        buffer[pos+2] = matrixData[y][x];           // some B value
-        // buffer[pos+2] = Math.round(255*matrixData[y][x]["population"]/maxValue); // some B value
-        buffer[pos+3] = 255;           // set alpha channel
+        const pos = (y * imWidth + x) * 4; // buffer is a flat array, so calculate corresponding (x, y) coordinates
+        buffer[pos  ] = 0; // red layer [0, 255]
+        buffer[pos+1] = 0; // green layer
+        buffer[pos+2] = matrixData[y][x]; // blue layer
+        buffer[pos+3] = 255; // alpha layer
     }
   }
 
+  // create off-screen canvas element to create image
+  let dataURL = createImageURL(buffer, imWidth, imHeight)
+
+  return [dataURL, imWidth, imHeight, buffer]
+}//convertDatatoImage
+
+
+function convertBuffertoImage(dataBuffer, imWidth, imHeight){
+
+  let buffer = new Uint8ClampedArray(imWidth * imHeight * 4);
+
+  //same than in convertDataToImage
+  for (let y = 0; y < imHeight; y++) {
+    for (let x = 0; x < imWidth; x++) {
+        var pos = (y * imWidth + x) * 4;
+        buffer[pos  ] = dataBuffer[pos  ];
+        buffer[pos+1] = dataBuffer[pos+1];
+        buffer[pos+2] = dataBuffer[pos+2];
+        buffer[pos+3] = 255;
+    }
+  }
   // create off-screen canvas element
-  // let canvas = document.createElement('canvas'),
-  //     ctx = canvas.getContext('2d');
+  let dataURL = createImageURL(buffer, imWidth, imHeight)
+
+  return dataURL
+}//convertBuffertoImage
+
+
+function createImageURL(dataBuffer, imWidth, imHeight) {
+  // create off-screen canvas element to create image
   const canvas = document.createElement('canvas'),
         ctx = canvas.getContext('2d');
 
   canvas.width = imWidth;
   canvas.height = imHeight;
 
-
   // create imageData object
   let imData = ctx.createImageData(imWidth, imHeight);
 
-  // set our buffer as source
-  imData.data.set(buffer);
+  // set our data as source
+  imData.data.set(dataBuffer);
 
-  // update canvas with new data
+  // update off-screen canvas with new data
   ctx.putImageData(imData, 0, 0);
 
-  const dataUri = canvas.toDataURL(); // produces a PNG file
+  const dataURL = canvas.toDataURL();//produces a PNG file
 
-  return [dataUri, imWidth, imHeight, buffer]
-}
-
-
-function convertMatrixtoImage(dataBuffer, imWidth, imHeight){
-
-  let buffer = new Uint8ClampedArray(imWidth * imHeight * 4); // have enough bytes
-
-  //normalize data
-  for (let y = 0; y < imHeight; y++) {
-    for (let x = 0; x < imWidth; x++) {
-        var pos = (y * imWidth + x) * 4; // position in channel
-        buffer[pos  ] = dataBuffer[pos  ];           // some R value [0, 255]
-        buffer[pos+1] = dataBuffer[pos+1];           // some G value
-        buffer[pos+2] = dataBuffer[pos+2];           // some B value
-        buffer[pos+3] = 255;           // set alpha channel
-    }
-  }
-  // create off-screen canvas element
-  // let canvas = document.createElement('canvas'),
-  //     ctx = canvas.getContext('2d');
-  const canvas = document.createElement('canvas'),
-    ctx = canvas.getContext('2d');
-
-  canvas.width = imWidth;
-  canvas.height = imHeight;
-
-  // create imageData object
-  let imData = ctx.createImageData(imWidth, imHeight);
-
-  // set our buffer as source
-  imData.data.set(buffer);
-
-  // update canvas with new data
-  ctx.putImageData(imData, 0, 0);
-
-  const dataUri = canvas.toDataURL(); // produces a PNG file
-
-  return dataUri
-}
+  return dataURL
+}//createImageURL
 
 
 function loadImage(dataImage, imWidth, imHeight){
@@ -291,7 +279,7 @@ function loadImage(dataImage, imWidth, imHeight){
 
     ctx.drawImage(img, 0, 0, imWidth, imHeight)
   }
-}
+}//loadImage
 
 
 
@@ -303,10 +291,9 @@ function updateImageData(dataImage, imWidth, imHeight){
   img.src = dataImage
 
   img.onload = function() {
-
     ctx.drawImage(img, 0, 0, imWidth, imHeight)
   }
-}
+}//updateImageData
 
 
 function formatData(data){
@@ -358,11 +345,7 @@ function formatData(data){
     )
   )
 
-  const allValues = _.flatten(matrixLatLon)
-  const maxValue = d3.max(allValues)
-
-  // return [matrixData, extentLon, extentLat, maxValue]
-  return [matrixLatLon, extentLon, extentLat, maxValue]
+  return [matrixLatLon, extentLon, extentLat]
 
 }//formatData
 
@@ -448,35 +431,7 @@ function euler(imData, beta, gamma, imWidth, imHeight){
     }
   }
   return newData
-}
-
-function kernel(d1, imWidth, imHeight, k) {
-  let d2 = []
-
-  for (let y = 0; y < imHeight; y++) {
-    for (let x = 0; x < imWidth; x++) {
-      const pos = (y * imWidth + x) * 4 + 2; //blue layer
-      const pos_a = ((y-1) * imWidth + x) * 4 + 2;
-      const pos_b = ((y+1) * imWidth + x) * 4 + 2;
-      // WARNING: Optimized code.
-      d2[pos] = (
-          d1[pos_a - 4] * k[0]
-        + d1[pos_a] * k[1]
-        + d1[pos_a + 4] * k[2]
-        + d1[pos-4] * k[3]
-        + d1[pos] * k[4]
-        + d1[pos + 4] * k[5]
-        + d1[pos_b-4] * k[6]
-        + d1[pos_b] * k[7]
-        + d1[pos_b+4] * k[8]
-      ) | 0
-    }
-  }
-
-d1 = d2
-
-}
-
+}//euler
 
 
 </script>

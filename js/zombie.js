@@ -8,8 +8,8 @@ function storeState(dataGrid, imWidth, imHeight){
   for (let y = 0; y < imHeight; y++) {
     for (let x = 0; x < imWidth; x++) {
       let pos = (y * imWidth + x) * 4 + 0; // position in buffer based
-        pI += dataGrid[pos]
-        pR += dataGrid[pos+1]
+        pI += dataGrid[pos+1]
+        pR += dataGrid[pos+0]
         pS += dataGrid[pos+2]
     }
   }
@@ -165,17 +165,17 @@ function euler(imData, beta, gamma, imWidth, imHeight){
   for (let y = 0; y < imHeight; y++) {
     for (let x = 0; x < imWidth; x++) {
       const posS = (y * imWidth + x) * 4 + 2; //blue layer
-      const posI = (y * imWidth + x) * 4 + 0;
-      const posR = (y * imWidth + x) * 4 + 1; // position in buffer based on x and y
+      const posI = (y * imWidth + x) * 4 + 1;
+      const posR = (y * imWidth + x) * 4 + 0; // position in buffer based on x and y
 
       const posAlpha = (y * imWidth + x) * 4 + 3; // position in buffer based on x and y
       newData[posAlpha] = 255 //alpha channel
 
       const posS_a = ((y-1) * imWidth + x) * 4 + 2;
-      const posI_a = ((y-1) * imWidth + x) * 4 + 0;
+      const posI_a = ((y-1) * imWidth + x) * 4 + 1;
 
       const posS_b = ((y+1) * imWidth + x) * 4 + 2;
-      const posI_b = ((y+1) * imWidth + x) * 4 + 0;
+      const posI_b = ((y+1) * imWidth + x) * 4 + 1;
 
       
       //new infection
@@ -239,3 +239,11 @@ function euler(imData, beta, gamma, imWidth, imHeight){
   }
   return newData
 }//euler
+
+function storeGuess(event){
+  const x = event.offsetX;
+  const y = event.offsetY;
+
+  const posI = ((imHeight-y) * imWidth + x) * 4 + 1;
+  dataGrid[posI] = 1
+}

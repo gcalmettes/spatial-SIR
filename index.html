@@ -30,15 +30,24 @@
   color: white;
 }
 
+.instructionText {
+  width: 200px;
+  position: absolute;
+  left: 600px;
+  top: 10px;
+  font-size: 1.5em;
+  color: black;
+}
+
 text {
   font-family: sans-serif;
 }
 
 </style>
 
-<canvas style="position: absolute; left: 0; top: 0"></canvas>
-<svg id="infectionGraph" style="position: absolute; left: 545; top: 0"></svg>
-<svg id="deathGraph" style="position: absolute; left: 545; top: 300"></svg>
+<canvas style="position: absolute; left: 0; top: 0" onclick="storeGuess(event)"></canvas>
+<svg id="infectionGraph" style="position: absolute; left: 545; top: 80"></svg>
+<svg id="deathGraph" style="position: absolute; left: 545; top: 280"></svg>
 
 <div class="daysCount">
   Days: <span id="daysCounter"></span>
@@ -49,10 +58,10 @@ text {
 <script src="js/zombie.js"></script>
 
 <script type="text/javascript">
-    
+
 const margin = {top: 20, right: 10, bottom: 20, left: 75},
-    width = 480 - margin.left - margin.right,
-    height = 250 - margin.top - margin.bottom
+    width = 400 - margin.left - margin.right,
+    height = 200 - margin.top - margin.bottom
 
 //two svg for the real time data
 const svgInfection = d3.select("#infectionGraph")
@@ -70,7 +79,7 @@ const svgDeadAlive = d3.select("#deathGraph")
     .attr("transform", `translate(${margin.left}, ${margin.top})`)
     .attr("width", width)
     .attr("height", height)
-  
+
 const pathInfection = svgInfection
   .append('path')
     .attr("class", "pathInfection")
@@ -103,6 +112,7 @@ const yScaleInfection = d3.scaleLinear()
 const yScaleDeadAlive = d3.scaleLinear()
   .range([+svgDeadAlive.attr("height"), 0])
 
+let imageData, imWidth, imHeight, dataGrid;
 
 d3.json("data/FR-dataGrid2011.json", data => {
 
@@ -121,10 +131,11 @@ d3.json("data/FR-dataGrid2011.json", data => {
     d.lat = lat * latSign;
     d.lon = lon * lonSign;
 
-  })
+  });
 
   //initial image
-  let [imageData, imWidth, imHeight, dataGrid] = convertDatatoImage(data);
+  let initialState = convertDatatoImage(data);
+  [imageData, imWidth, imHeight, dataGrid] = [...initialState]
   loadImage(imageData, imWidth, imHeight);
 
   //SIR Model parameters
@@ -132,7 +143,7 @@ d3.json("data/FR-dataGrid2011.json", data => {
   const gamma = 2 //how fast you go from zombie to dead. Sort of average of how fast our zombie hunters are working and natural death ... 2 time iterations in this case
 
   //Let's put patient 0 somewhere between Lyon and Nimes
-  const posI_0 = 410204
+  const posI_0 = 410205
   dataGrid[posI_0] = 1
 
   //Initial state of susceptibles/infected/dead people
@@ -157,7 +168,7 @@ d3.json("data/FR-dataGrid2011.json", data => {
     .scale(yScaleInfection)
     .tickFormat(d3.format(".2%"))
 
-  
+
   svgInfection
     .append("g")
       .attr("transform", `translate(${-63}, ${height/2})`)
@@ -186,6 +197,11 @@ d3.json("data/FR-dataGrid2011.json", data => {
 
   infectionAxis
     .call(infectionAxisLeft)
+
+  d3.select("body")
+    .append("div")
+      .attr("class", "instructionText")
+      .html("Click on the map to add more Zombies")
 
   //Run the simulation for iterMax iterations
   let iter = 0;
@@ -230,7 +246,7 @@ d3.json("data/FR-dataGrid2011.json", data => {
         .duration(100)
       .call(infectionAxisLeft)
 
-    
+
     pathInfection
       .attr('d', line(nInfected.map((d,i) => {
         return [i, yScaleInfection(d)];

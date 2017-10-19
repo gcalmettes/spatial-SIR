@@ -22,6 +22,14 @@
   stroke-width: 2;
 }
 
+.daysCount {
+  position: absolute;
+  left: 380px;
+  top: 20px;
+  font-size: 1.5em;
+  color: white;
+}
+
 text {
   font-family: sans-serif;
 }
@@ -32,6 +40,224 @@ text {
 <svg id="infectionGraph" style="position: absolute; left: 545; top: 0"></svg>
 <svg id="deathGraph" style="position: absolute; left: 545; top: 300"></svg>
 
+<div class="daysCount">
+  Days: <span id="daysCounter"></span>
+</div>
+
 <script src="js/d3.v4.min.js"></script>
 <script src="js/lodash.js"></script>
 <script src="js/zombie.js"></script>
+
+<script type="text/javascript">
+    
+const margin = {top: 20, right: 10, bottom: 20, left: 75},
+    width = 480 - margin.left - margin.right,
+    height = 250 - margin.top - margin.bottom
+
+//two svg for the real time data
+const svgInfection = d3.select("#infectionGraph")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+  .append("g")
+    .attr("transform", `translate(${margin.left}, ${margin.top})`)
+    .attr("width", width)
+    .attr("height", height)
+
+const svgDeadAlive = d3.select("#deathGraph")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+  .append("g")
+    .attr("transform", `translate(${margin.left}, ${margin.top})`)
+    .attr("width", width)
+    .attr("height", height)
+  
+const pathInfection = svgInfection
+  .append('path')
+    .attr("class", "pathInfection")
+
+const pathDeath = svgDeadAlive
+  .append('path')
+    .attr("class", "pathDeath")
+
+const pathSusceptible = svgDeadAlive
+  .append('path')
+    .attr("class", "pathSusceptible")
+
+const infectionAxis = svgInfection
+  .append("g")
+    .attr("class", "yAxis")
+    .attr("transform", `translate(${-3}, 0)`)
+
+const deadAliveAxis = svgDeadAlive
+  .append("g")
+    .attr("class", "yAxis")
+    .attr("transform", `translate(${-3}, 0)`)
+
+
+const line = d3.line()
+  .curve(d3.curveCatmullRom.alpha(0.5))
+
+const yScaleInfection = d3.scaleLinear()
+  .range([+svgInfection.attr("height"), 0])
+
+const yScaleDeadAlive = d3.scaleLinear()
+  .range([+svgDeadAlive.attr("height"), 0])
+
+
+d3.json("data/FR-dataGrid2011.json", data => {
+
+  //extract lat/lon and sign (positive/negative) from Grid cell ID
+  const reLat = /.*[NS]([0-9]+)[EW].*/,
+    reLon = /.*[EW]([0-9]+)/,
+    reLatSign = /.*([NS]).*/
+    reLonSign = /.*([EW]).*/
+
+  data.forEach(d => {
+    const lat = reLat.exec(d.GRD_ID)[1]/100 || null;
+    const lon = reLon.exec(d.GRD_ID)[1]/100 || null;
+    const latSign = reLatSign.exec(d.GRD_ID)[1] === "N" ? 1 : -1;
+    const lonSign = reLonSign.exec(d.GRD_ID)[1] === "E" ? 1 : -1;
+
+    d.lat = lat * latSign;
+    d.lon = lon * lonSign;
+
+  })
+
+  //initial image
+  let [imageData, imWidth, imHeight, dataGrid] = convertDatatoImage(data);
+  loadImage(imageData, imWidth, imHeight);
+
+  //SIR Model parameters
+  const beta = 0.01 //how transmittable the disease is. One bite is all it takes!
+  const gamma = 2 //how fast you go from zombie to dead. Sort of average of how fast our zombie hunters are working and natural death ... 2 time iterations in this case
+
+  //Let's put patient 0 somewhere between Lyon and Nimes
+  const posI_0 = 410204
+  dataGrid[posI_0] = 1
+
+  //Initial state of susceptibles/infected/dead people
+  let nInfected = [],
+      nRemoved = [],
+      nSusceptible = [],
+      ct = 0;//for rolling window if too much iterations
+
+  let [pInfected, pRemoved, pSusceptible] = storeState(dataGrid, imWidth, imHeight)
+  //pInfected as percentage of living population
+  pInfected = pInfected/(pSusceptible+pInfected)
+
+  nInfected.push(pInfected)
+  nRemoved.push(pRemoved)
+  nSusceptible.push(pSusceptible)
+
+  const deadAliveAxisLeft = d3.axisLeft()
+    .scale(yScaleDeadAlive)
+    .tickFormat(d3.format(".0%"))
+
+  const infectionAxisLeft = d3.axisLeft()
+    .scale(yScaleInfection)
+    .tickFormat(d3.format(".2%"))
+
+  
+  svgInfection
+    .append("g")
+      .attr("transform", `translate(${-63}, ${height/2})`)
+    .append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("text-anchor", "middle")
+      .html("Current")
+  svgInfection
+    .append("g")
+      .attr("transform", `translate(${-50}, ${height/2})`)
+    .append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("text-anchor", "middle")
+      .html("infected population")
+
+  svgDeadAlive
+    .append("g")
+      .attr("transform", `translate(${-40}, ${height/2})`)
+    .append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("text-anchor", "middle")
+      .html("Dead/Alive")
+
+  deadAliveAxis
+    .call(deadAliveAxisLeft)
+
+  infectionAxis
+    .call(infectionAxisLeft)
+
+  //Run the simulation for iterMax iterations
+  let iter = 0;
+  const iterMax = 400;
+
+  //initiate day counter
+  let daysCount = d3.select("#daysCounter")
+    .html(iter)
+
+  const timer = d3.timer(function() {
+    //euler method to calculate new state
+    dataGrid = euler(dataGrid, beta, gamma, imWidth, imHeight);
+
+    //generate new image from the latest simulation data
+    imageData = createImageURL(dataGrid, imWidth, imHeight)
+    updateImageData(imageData, imWidth, imHeight)
+
+    //store current susceptibles/infected/dead state
+    let [pInfected, pRemoved, pSusceptible] = storeState(dataGrid, imWidth, imHeight)
+    //pInfected as percentage of living population
+    pInfected = pInfected/(pSusceptible+pInfected)
+
+    if (ct++ > width) { //rolling window
+      nInfected.shift();
+      nRemoved.shift();
+      nSusceptible.shift();
+    }
+    nInfected.push(pInfected)
+    nRemoved.push(pRemoved)
+    nSusceptible.push(pSusceptible)
+
+    yScaleInfection
+      .domain([0, d3.max(nInfected)]);
+    yScaleDeadAlive
+      .domain([0, d3.max(d3.merge([nRemoved, nSusceptible]))])
+
+    infectionAxisLeft
+      .scale(yScaleInfection)
+
+    infectionAxis
+      .transition()
+        .duration(100)
+      .call(infectionAxisLeft)
+
+    
+    pathInfection
+      .attr('d', line(nInfected.map((d,i) => {
+        return [i, yScaleInfection(d)];
+      })));
+
+    pathDeath
+      .attr('d', line(nRemoved.map((d,i) => {
+        return [i, yScaleDeadAlive(d)];
+      })));
+
+    pathSusceptible
+      .attr('d', line(nSusceptible.map((d,i) => {
+        return [i, yScaleDeadAlive(d)];
+      })));
+
+    iter += 1
+
+    //update day counter
+    daysCount
+      .html(iter)
+
+
+    if (iter >= iterMax) timer.stop()
+
+  });//d3.timer
+
+})//d3.json
+
+
+</script>
